@@ -1,0 +1,23 @@
+
+h
+java:S1192l"FDefine a constant instead of duplicating this literal "usage" 3 times.(öğ÷òşÿÿÿÿ8‚ƒô4
+k
+java:S1192ù"HDefine a constant instead of duplicating this literal "Success" 3 times.(êñû€øÿÿÿÿ8´€€’4
+h
+java:S1192l"FDefine a constant instead of duplicating this literal "Usage" 3 times.(öğ÷òşÿÿÿÿ8ƒƒô4
+l
+java:S1192p"JDefine a constant instead of duplicating this literal "sessionId" 3 times.(ÚÜ³äøÿÿÿÿ8ƒƒô4
+f
+java:S1192‰"HDefine a constant instead of duplicating this literal "Not run" 4 times.(Á¢‚„8µ€€’4
+j
+java:S1192ú"GDefine a constant instead of duplicating this literal "Failed" 5 times.(¥ûµşúÿÿÿÿ8µ€€’4
+{
+java:S1192ˆ"XDefine a constant instead of duplicating this literal "Blank = keep cURL value" 3 times.(µòœñùÿÿÿÿ8Ó‹ÿ‘4
+v
+java:S1450:"TRemove the "table" field and declare it as a local variable in the relevant methods.(ÀÿÓğşÿÿÿÿ8êŸ®4
+P
+java:S6126¤"2Replace this String concatenation with Text block.(ÏÔ8ìÿ‘4
+u
+java:S3776Ø"RRefactor this method to reduce its Cognitive Complexity from 20 to the 15 allowed.(¦İ½ˆùÿÿÿÿ8¹‚€’4
+|
+java:S2142í"^Either re-interrupt this method or rethrow the "InterruptedException" that can be caught here.(®ËúÃ8»‚€’4

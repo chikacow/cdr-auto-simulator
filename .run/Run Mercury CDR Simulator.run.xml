@@ -1,0 +1,11 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Run Mercury CDR Simulator" type="Application" factoryName="Application">
+    <option name="MAIN_CLASS_NAME" value="vn.mercury.cdr.CdrSimulatorApp" />
+    <option name="VM_PARAMETERS" value="--module-path /Users/kiencc/.m2/repository/org/openjfx/javafx-base/17.0.15/javafx-base-17.0.15-mac-aarch64.jar:/Users/kiencc/.m2/repository/org/openjfx/javafx-graphics/17.0.15/javafx-graphics-17.0.15-mac-aarch64.jar:/Users/kiencc/.m2/repository/org/openjfx/javafx-controls/17.0.15/javafx-controls-17.0.15-mac-aarch64.jar --add-modules javafx.controls" />
+    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+    <module name="cdr-simulator-fx" />
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>
