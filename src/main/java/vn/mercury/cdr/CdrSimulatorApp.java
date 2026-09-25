@@ -36,7 +36,6 @@ import java.util.regex.Pattern;
 
 /** Desktop tool for sending the CDR cURLs stored in an Excel file. */
 public final class CdrSimulatorApp extends Application {
-    private static final String RETEST_MERCURY = "retest mercury";
     private static final DateTimeFormatter ISO_MILLIS = DateTimeFormatter
             .ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'")
             .withZone(ZoneOffset.UTC);
@@ -51,6 +50,8 @@ public final class CdrSimulatorApp extends Application {
     private final ObservableList<CdrRow> rows = FXCollections.observableArrayList();
     private final TextField clientId = new TextField();
     private final PasswordField accessKey = new PasswordField();
+    private final ComboBox<SessionIdMode> sessionIdMode = new ComboBox<>(FXCollections.observableArrayList(SessionIdMode.values()));
+    private final TextField sessionIdValue = new TextField();
     private final Map<CdrType, IdFields> ids = new EnumMap<>(CdrType.class);
     private final TextArea logArea = new TextArea();
     private final Label fileLabel = new Label("No file selected");
@@ -116,7 +117,7 @@ public final class CdrSimulatorApp extends Application {
         table.getColumns().add(textColumn("Response", "response", 360));
         table.setPlaceholder(new Label("Import an Excel file with the Usage and Curl columns."));
 
-        VBox configuration = new VBox(10, buildClientConfiguration(), buildIdConfiguration(), buildGuide());
+        VBox configuration = new VBox(10, buildClientConfiguration(), buildSessionIdConfiguration(), buildIdConfiguration(), buildGuide());
         configuration.setPadding(new Insets(0, 0, 0, 12));
         configuration.setPrefWidth(390);
         SplitPane splitPane = new SplitPane(table, new ScrollPane(configuration));
@@ -137,6 +138,32 @@ public final class CdrSimulatorApp extends Application {
         GridPane.setHgrow(clientId, Priority.ALWAYS);
         GridPane.setHgrow(accessKey, Priority.ALWAYS);
         return titled("Test client", grid);
+    }
+
+    private Node buildSessionIdConfiguration() {
+        sessionIdMode.getSelectionModel().select(SessionIdMode.AUTO);
+        sessionIdMode.valueProperty().addListener((observable, previous, current) -> updateSessionIdPrompt());
+        updateSessionIdPrompt();
+        GridPane grid = new GridPane();
+        grid.setHgap(8);
+        grid.setVgap(8);
+        grid.add(new Label("Mode"), 0, 0);
+        grid.add(sessionIdMode, 1, 0);
+        grid.add(new Label("Session ID / Prefix"), 0, 1);
+        grid.add(sessionIdValue, 1, 1);
+        GridPane.setHgrow(sessionIdMode, Priority.ALWAYS);
+        GridPane.setHgrow(sessionIdValue, Priority.ALWAYS);
+        return titled("Session ID", grid);
+    }
+
+    private void updateSessionIdPrompt() {
+        SessionIdMode mode = sessionIdMode.getValue();
+        sessionIdValue.setDisable(mode == SessionIdMode.AUTO);
+        sessionIdValue.setPromptText(switch (mode) {
+            case AUTO -> "Generated automatically";
+            case EXACT -> "Enter an exact Session ID";
+            case PREFIX -> "Enter a prefix";
+        });
     }
 
     private Node buildIdConfiguration() {
@@ -161,13 +188,14 @@ public final class CdrSimulatorApp extends Application {
     }
 
     private Node buildGuide() {
-        Label guide = new Label("Input format: the first worksheet must have Usage and Curl as its first two headers; Note is an optional third header. "
-                + "You may import the reference file directly: the tool reads only the 'retest mercury' sheet, Usage in column C and Curl in column E.\n\n"
-                + "When preparing cURLs, the tool replaces Customer ID, Subscription ID, accessKey, current UTC timestamps and the unique Session ID. "
+        Label guide = new Label("Input format: the first worksheet must have 'Usage' and 'Curl' as its first two headers; 'Note' is an optional third header. "
+                + "The tool always reads the first worksheet in the selected Excel file.\n\n"
+                + "When preparing cURLs, the tool replaces Customer ID, Subscription ID, accessKey, current UTC timestamps and the selected Session ID value. "
                 + "Leave Customer ID, Subscription ID or Access key blank to keep the value already in each cURL. "
                 + "Use tool config is selected by default for every Usage; clear it to keep all IDs and Access key from that Usage's original cURL. "
                 + "Rows with a Usage but no cURL are marked Missing cURL and cannot be selected. "
                 + "Each Prepare or Simulate action resets the prior run's status, result, request, response, Session ID and SQL checks. "
+                + "Session ID can be auto-generated, entered exactly, or auto-generated with a user prefix. "
                 + "Leave Client ID blank to check for any non-1130 client and client 1130.");
         guide.setWrapText(true);
         return titled("Instructions", guide);
@@ -274,22 +302,8 @@ public final class CdrSimulatorApp extends Application {
 
     private List<CdrRow> readRows(Path source) throws IOException {
         try (InputStream input = Files.newInputStream(source); Workbook workbook = WorkbookFactory.create(input)) {
-            Sheet mercury = workbook.getSheet(RETEST_MERCURY);
-            if (mercury != null) return rowsFromRetestMercury(mercury);
             return rowsFromTwoColumnSheet(workbook.getSheetAt(0));
         }
-    }
-
-    private List<CdrRow> rowsFromRetestMercury(Sheet sheet) {
-        List<CdrRow> imported = new ArrayList<>();
-        DataFormatter formatter = new DataFormatter();
-        for (Row row : sheet) {
-            String usage = value(formatter, row.getCell(2));
-            String curl = value(formatter, row.getCell(4));
-            String note = value(formatter, row.getCell(5));
-            if (!usage.isBlank()) imported.add(new CdrRow(usage, curl, note));
-        }
-        return imported;
     }
 
     private List<CdrRow> rowsFromTwoColumnSheet(Sheet sheet) throws IOException {
@@ -297,7 +311,7 @@ public final class CdrSimulatorApp extends Application {
         Row header = sheet.getRow(sheet.getFirstRowNum());
         if (header == null || !"usage".equalsIgnoreCase(value(formatter, header.getCell(0)).trim())
                 || !"curl".equalsIgnoreCase(value(formatter, header.getCell(1)).trim())) {
-            throw new IOException("The file must start with the Usage and Curl columns, or contain a 'retest mercury' sheet.");
+            throw new IOException("The first worksheet must start with the Usage and Curl columns.");
         }
         String thirdHeader = value(formatter, header.getCell(2)).trim();
         if (!thirdHeader.isBlank() && !"note".equalsIgnoreCase(thirdHeader)) {
@@ -362,6 +376,9 @@ public final class CdrSimulatorApp extends Application {
 
     private void assertCommonConfiguration() {
         if (rows.isEmpty()) throw new IllegalArgumentException("No CDRs are available to process.");
+        if (sessionIdMode.getValue() != SessionIdMode.AUTO && sessionIdValue.getText().isBlank()) {
+            throw new IllegalArgumentException("Enter a Session ID or prefix for the selected Session ID mode.");
+        }
     }
 
     private void prepare(CdrRow row) {
@@ -382,7 +399,7 @@ public final class CdrSimulatorApp extends Application {
                 ? configuredOrDefault(accessKey.getText(), defaults.accessKey)
                 : defaults.accessKey;
         String now = ISO_MILLIS.format(Instant.now());
-        String session = uniqueSessionId();
+        String session = sessionIdForRun();
         String curl = rewriteCurl(row.originalCurl, type, customerId, subscriptionId, configuredAccessKey, now, session);
         row.type.set(type.display);
         row.sessionId.set(session);
@@ -392,6 +409,14 @@ public final class CdrSimulatorApp extends Application {
         row.status.set("Ready");
         row.result.set("Not run");
         row.response.set("");
+    }
+
+    private String sessionIdForRun() {
+        return switch (sessionIdMode.getValue()) {
+            case AUTO -> uniqueSessionId();
+            case EXACT -> sessionIdValue.getText().trim();
+            case PREFIX -> sessionIdValue.getText().trim() + "-" + uniqueSessionId();
+        };
     }
 
     private CurlDefaults defaultsFrom(String curl) {
@@ -689,6 +714,19 @@ public final class CdrSimulatorApp extends Application {
             if (!matcher.find()) return null;
             return switch (matcher.group(1).toLowerCase(Locale.ROOT)) { case "data" -> DATA; case "session" -> SESSION; default -> EVENT; };
         }
+    }
+
+    private enum SessionIdMode {
+        AUTO("Auto generate"),
+        EXACT("Use exact Session ID"),
+        PREFIX("Auto generate with prefix");
+
+        private final String display;
+
+        SessionIdMode(String display) { this.display = display; }
+
+        @Override
+        public String toString() { return display; }
     }
 
     private static final class IdFields {

@@ -27,7 +27,7 @@ The project includes the **Run Mercury CDR Simulator** Application configuration
 ## Input Excel file
 
 - Standard format: the first worksheet starts with `Usage` and `Curl`; `Note` is an optional third column immediately to the right of `Curl`.
-- You may import `cdr die.xlsx` directly. The application reads only its `retest mercury` sheet: Usage in column C and Curl in column E. All other worksheets are ignored.
+- The application always reads the first worksheet in the selected Excel file. All other worksheets are ignored.
 
 Rows with a Usage but no Curl stay visible as `Missing cURL`, but cannot be selected, prepared, or simulated.
 
@@ -38,10 +38,11 @@ Each cURL must contain `/charge/offline/data`, `/charge/offline/session`, or `/c
 1. Import the Excel file. Client ID is optional: enter it to check that exact client alongside `1130`; leave it blank to check for any non-`1130` client alongside `1130`.
 2. Customer ID, Subscription ID, and Access key are optional. Leave a field blank to keep the value already present in each individual cURL; enter a value to override it for that CDR type. Notes are displayed next to Usage and included in exported results.
 3. Every Usage is selected for **Use tool config** by default. Clear that checkbox for a specific Usage to preserve its original Customer ID, Subscription ID, and Access key, even when tool configuration is entered.
-4. Select **Prepare cURL and SQL** to create configured cURLs and a unique Session ID for each CDR.
-5. Select the required rows and click **Simulate selected**. The application asks for confirmation before sending requests.
-6. A response containing exactly `"responseDetail": "OK"` is marked **Success** in green. Every other response is **Failed** in red.
-7. Click **Export Excel results**. The `CDR Results` sheet provides one SQL query per CDR. The `Batch Check` sheet provides one query for all generated CDRs. It returns only exceptions: no CDR created, required client missing, or client `1130` missing.
+4. Choose a Session ID mode: **Auto generate** (default), **Use exact Session ID**, or **Auto generate with prefix**. An exact Session ID may be shared by multiple Usage rows.
+5. Select **Prepare cURL and SQL** to create configured cURLs and a Session ID for each CDR.
+6. Select the required rows and click **Simulate selected**. The application asks for confirmation before sending requests.
+7. A response containing exactly `"responseDetail": "OK"` is marked **Success** in green. Every other response is **Failed** in red.
+8. Click **Export Excel results**. The `CDR Results` sheet provides one SQL query per CDR. The `Batch Check` sheet provides one query for all generated CDRs. It returns only exceptions: no CDR created, required client missing, or client `1130` missing.
 
 Every Prepare or Simulate action starts a new run. It clears the prior Status, Result, Request, Response, Session ID, and SQL checks for all Usage rows before generating new values for the rows that are processed.
 
