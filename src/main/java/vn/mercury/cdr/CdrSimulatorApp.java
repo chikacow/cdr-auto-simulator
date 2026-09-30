@@ -188,8 +188,8 @@ public final class CdrSimulatorApp extends Application {
     }
 
     private Node buildGuide() {
-        Label guide = new Label("Input format: the first worksheet must have 'Usage' and 'Curl' as its first two headers; 'Note' is an optional third header. "
-                + "The tool always reads the first worksheet in the selected Excel file.\n\n"
+        Label guide = new Label("Input format: the selected worksheet must have 'Usage' and 'Curl' as its first two headers; 'Note' is an optional third header. "
+                + "Choose the worksheet to import after selecting the Excel file.\n\n"
                 + "When preparing cURLs, the tool replaces Customer ID, Subscription ID, accessKey, current UTC timestamps and the selected Session ID value. "
                 + "Leave Customer ID, Subscription ID or Access key blank to keep the value already in each cURL. "
                 + "Use tool config is selected by default for every Usage; clear it to keep all IDs and Access key from that Usage's original cURL. "
@@ -290,19 +290,48 @@ public final class CdrSimulatorApp extends Application {
         File file = chooser.showOpenDialog(stage);
         if (file == null) return;
         try {
-            List<CdrRow> imported = readRows(file.toPath());
+            List<String> sheetNames = readSheetNames(file.toPath());
+            String selectedSheet = chooseSheet(sheetNames);
+            if (selectedSheet == null) return;
+
+            List<CdrRow> imported = readRows(file.toPath(), selectedSheet);
             rows.setAll(imported);
-            fileLabel.setText(file.getName());
+            fileLabel.setText(file.getName() + " / " + selectedSheet);
             resultLabel.setText(imported.size() + " CDRs imported");
-            log("Imported " + imported.size() + " CDRs from " + file.getName());
+            log("Imported " + imported.size() + " CDRs from " + file.getName() + " / " + selectedSheet);
         } catch (Exception exception) {
             showError("Unable to import Excel", exception.getMessage());
         }
     }
 
-    private List<CdrRow> readRows(Path source) throws IOException {
+    private List<String> readSheetNames(Path source) throws IOException {
         try (InputStream input = Files.newInputStream(source); Workbook workbook = WorkbookFactory.create(input)) {
-            return rowsFromTwoColumnSheet(workbook.getSheetAt(0));
+            List<String> sheetNames = new ArrayList<>();
+            for (int index = 0; index < workbook.getNumberOfSheets(); index++) {
+                sheetNames.add(workbook.getSheetName(index));
+            }
+            if (sheetNames.isEmpty()) {
+                throw new IOException("The selected Excel file does not contain any worksheets.");
+            }
+            return sheetNames;
+        }
+    }
+
+    private String chooseSheet(List<String> sheetNames) {
+        ChoiceDialog<String> dialog = new ChoiceDialog<>(sheetNames.get(0), sheetNames);
+        dialog.setTitle("Select worksheet");
+        dialog.setHeaderText("Select the worksheet to import");
+        dialog.setContentText("Worksheet:");
+        return dialog.showAndWait().orElse(null);
+    }
+
+    private List<CdrRow> readRows(Path source, String sheetName) throws IOException {
+        try (InputStream input = Files.newInputStream(source); Workbook workbook = WorkbookFactory.create(input)) {
+            Sheet sheet = workbook.getSheet(sheetName);
+            if (sheet == null) {
+                throw new IOException("The selected worksheet was not found in the Excel file.");
+            }
+            return rowsFromTwoColumnSheet(sheet);
         }
     }
 
@@ -311,7 +340,7 @@ public final class CdrSimulatorApp extends Application {
         Row header = sheet.getRow(sheet.getFirstRowNum());
         if (header == null || !"usage".equalsIgnoreCase(value(formatter, header.getCell(0)).trim())
                 || !"curl".equalsIgnoreCase(value(formatter, header.getCell(1)).trim())) {
-            throw new IOException("The first worksheet must start with the Usage and Curl columns.");
+            throw new IOException("The selected worksheet must start with the Usage and Curl columns.");
         }
         String thirdHeader = value(formatter, header.getCell(2)).trim();
         if (!thirdHeader.isBlank() && !"note".equalsIgnoreCase(thirdHeader)) {

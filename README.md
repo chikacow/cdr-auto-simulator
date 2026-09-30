@@ -26,8 +26,8 @@ The project includes the **Run Mercury CDR Simulator** Application configuration
 
 ## Input Excel file
 
-- Standard format: the first worksheet starts with `Usage` and `Curl`; `Note` is an optional third column immediately to the right of `Curl`.
-- The application always reads the first worksheet in the selected Excel file. All other worksheets are ignored.
+- Standard format: the worksheet to import starts with `Usage` and `Curl`; `Note` is an optional third column immediately to the right of `Curl`.
+- After selecting an Excel file, choose the worksheet to import. Other worksheets are not changed or read.
 
 Rows with a Usage but no Curl stay visible as `Missing cURL`, but cannot be selected, prepared, or simulated.
 
