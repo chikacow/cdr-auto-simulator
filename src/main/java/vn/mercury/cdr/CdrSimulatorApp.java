@@ -529,19 +529,7 @@ public final class CdrSimulatorApp extends Application {
                 for (CdrRow row : selected) {
                     Platform.runLater(() -> { row.status.set("Sending"); row.result.set("Checking"); });
                     try {
-                        List<String> command;
-                        String os = System.getProperty("os.name").toLowerCase(Locale.ROOT);
-                        if (os.contains("win")) {
-                            File gitBash = new File("C:\\Program Files\\Git\\bin\\bash.exe");
-                            if (gitBash.exists()) {
-                                command = List.of(gitBash.getAbsolutePath(), "-c", row.preparedCurl);
-                            } else {
-                                command = List.of("cmd.exe", "/c", row.preparedCurl);
-                            }
-                        } else {
-                            command = List.of("/bin/zsh", "-lc", row.preparedCurl);
-                        }
-                        Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
+                        Process process = new ProcessBuilder(commandForCurl(row.preparedCurl)).redirectErrorStream(true).start();
                         boolean complete = process.waitFor(45, TimeUnit.SECONDS);
                         String response = readLimited(process.getInputStream(), 4_000);
                         if (!complete) {
@@ -566,6 +554,62 @@ public final class CdrSimulatorApp extends Application {
         task.setOnSucceeded(event -> log("Simulation completed for " + selected.size() + " CDRs. Export Excel to get the check SQL."));
         task.setOnFailed(event -> showError("Simulation error", task.getException().getMessage()));
         new Thread(task, "cdr-simulation").start();
+    }
+
+    private List<String> commandForCurl(String curl) throws IOException {
+        if (!System.getProperty("os.name").toLowerCase(Locale.ROOT).contains("win")) {
+            return List.of("/bin/zsh", "-lc", curl);
+        }
+
+        List<String> arguments = splitCurlArguments(curl);
+        if (arguments.isEmpty() || !("curl".equalsIgnoreCase(arguments.get(0)) || "curl.exe".equalsIgnoreCase(arguments.get(0)))) {
+            throw new IOException("The cURL command must begin with curl.");
+        }
+        arguments.set(0, "curl.exe");
+        return arguments;
+    }
+
+    /** Splits the expected single cURL command without passing its JSON body through cmd.exe. */
+    private List<String> splitCurlArguments(String command) throws IOException {
+        List<String> arguments = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        boolean inSingleQuote = false;
+        boolean inDoubleQuote = false;
+        boolean escaped = false;
+
+        for (int index = 0; index < command.length(); index++) {
+            char character = command.charAt(index);
+            if (escaped) {
+                if (character != '\n' && character != '\r') current.append(character);
+                escaped = false;
+                continue;
+            }
+            if (!inSingleQuote && character == '\\') {
+                escaped = true;
+                continue;
+            }
+            if (!inDoubleQuote && character == '\'') {
+                inSingleQuote = !inSingleQuote;
+                continue;
+            }
+            if (!inSingleQuote && character == '"') {
+                inDoubleQuote = !inDoubleQuote;
+                continue;
+            }
+            if (!inSingleQuote && !inDoubleQuote && Character.isWhitespace(character)) {
+                if (!current.isEmpty()) {
+                    arguments.add(current.toString());
+                    current.setLength(0);
+                }
+                continue;
+            }
+            current.append(character);
+        }
+        if (escaped || inSingleQuote || inDoubleQuote) {
+            throw new IOException("The cURL command has an unclosed quote or escape character.");
+        }
+        if (!current.isEmpty()) arguments.add(current.toString());
+        return arguments;
     }
 
     private String readLimited(InputStream input, int limit) throws IOException {

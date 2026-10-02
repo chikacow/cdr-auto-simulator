@@ -7,3 +7,5 @@ I
 run-cdr-simulator.command,d/8/d81641f3a89354232146a6167ee14d1f6abeb9df
 7
 pom.xml,4/4/442292b8a7efeabbe4cc176709b833b1792140ec
+E
+run-cdr-simulator.bat,9/7/97f89b1909af5db4aa0d1a6cd7c661d48c0d4f2a
