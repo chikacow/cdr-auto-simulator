@@ -18,11 +18,17 @@ chmod +x /Users/kiencc/Downloads/cdr-simulator-fx/run-cdr-simulator.command
 /Users/kiencc/Downloads/cdr-simulator-fx/run-cdr-simulator.command
 ```
 
+On Windows, install Java 17+ and Apache Maven, then double-click `run-cdr-simulator.bat`, or run this from Command Prompt in the project directory:
+
+```bat
+run-cdr-simulator.bat
+```
+
 Do not open `target/cdr-simulator-fx-1.0.0.jar` directly or run `java -jar ...`. That jar does not package the JavaFX native runtime and will report `JavaFX runtime components are missing`.
 
 ## Run and debug in IntelliJ
 
-The project includes the **Run Mercury CDR Simulator** Application configuration in `.run`. After opening the project in IntelliJ and loading Maven dependencies, select that configuration in the top-right run selector and click Run or Debug. It compiles the code, runs `vn.mercury.cdr.CdrSimulatorApp`, and includes the JavaFX runtime for macOS Apple Silicon.
+The bundled **Run Mercury CDR Simulator** Application configuration is for macOS Apple Silicon. On Windows, run the Maven goal `javafx:run` from IntelliJ's Maven panel, or use `run-cdr-simulator.bat`.
 
 ## Input Excel file
 

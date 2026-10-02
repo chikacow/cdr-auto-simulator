@@ -529,7 +529,19 @@ public final class CdrSimulatorApp extends Application {
                 for (CdrRow row : selected) {
                     Platform.runLater(() -> { row.status.set("Sending"); row.result.set("Checking"); });
                     try {
-                        Process process = new ProcessBuilder("/bin/zsh", "-lc", row.preparedCurl).redirectErrorStream(true).start();
+                        List<String> command;
+                        String os = System.getProperty("os.name").toLowerCase(Locale.ROOT);
+                        if (os.contains("win")) {
+                            File gitBash = new File("C:\\Program Files\\Git\\bin\\bash.exe");
+                            if (gitBash.exists()) {
+                                command = List.of(gitBash.getAbsolutePath(), "-c", row.preparedCurl);
+                            } else {
+                                command = List.of("cmd.exe", "/c", row.preparedCurl);
+                            }
+                        } else {
+                            command = List.of("/bin/zsh", "-lc", row.preparedCurl);
+                        }
+                        Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
                         boolean complete = process.waitFor(45, TimeUnit.SECONDS);
                         String response = readLimited(process.getInputStream(), 4_000);
                         if (!complete) {
