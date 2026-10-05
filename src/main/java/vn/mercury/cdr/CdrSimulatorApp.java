@@ -528,12 +528,15 @@ public final class CdrSimulatorApp extends Application {
             @Override protected Void call() {
                 for (CdrRow row : selected) {
                     Platform.runLater(() -> { row.status.set("Sending"); row.result.set("Checking"); });
+                    CurlProcess curlProcess = null;
                     try {
-                        Process process = new ProcessBuilder(commandForCurl(row.preparedCurl)).redirectErrorStream(true).start();
+                        curlProcess = startCurl(row.preparedCurl);
+                        Process process = curlProcess.process();
                         boolean complete = process.waitFor(45, TimeUnit.SECONDS);
                         String response = readLimited(process.getInputStream(), 4_000);
                         if (!complete) {
                             process.destroyForcibly();
+                            process.waitFor(2, TimeUnit.SECONDS);
                             Platform.runLater(() -> { row.status.set("Timed out"); row.result.set("Failed"); row.response.set(response); });
                         } else {
                             int exit = process.exitValue();
@@ -546,6 +549,8 @@ public final class CdrSimulatorApp extends Application {
                         }
                     } catch (Exception exception) {
                         Platform.runLater(() -> { row.status.set("Send failed"); row.result.set("Failed"); row.response.set(exception.getMessage()); });
+                    } finally {
+                        if (curlProcess != null) curlProcess.deletePayload();
                     }
                 }
                 return null;
@@ -554,6 +559,28 @@ public final class CdrSimulatorApp extends Application {
         task.setOnSucceeded(event -> log("Simulation completed for " + selected.size() + " CDRs. Export Excel to get the check SQL."));
         task.setOnFailed(event -> showError("Simulation error", task.getException().getMessage()));
         new Thread(task, "cdr-simulation").start();
+    }
+
+    private CurlProcess startCurl(String curl) throws IOException {
+        List<String> command = commandForCurl(curl);
+        Path payloadFile = null;
+        if (System.getProperty("os.name").toLowerCase(Locale.ROOT).contains("win")) {
+            for (int index = 0; index < command.size() - 1; index++) {
+                if (isCurlDataOption(command.get(index))) {
+                    payloadFile = Files.createTempFile("mercury-cdr-", ".json");
+                    Files.writeString(payloadFile, command.get(index + 1), StandardCharsets.UTF_8);
+                    command.set(index, "--data-binary");
+                    command.set(index + 1, "@" + payloadFile.toAbsolutePath());
+                    break;
+                }
+            }
+        }
+        return new CurlProcess(new ProcessBuilder(command).redirectErrorStream(true).start(), payloadFile);
+    }
+
+    private boolean isCurlDataOption(String argument) {
+        return "--data".equals(argument) || "--data-raw".equals(argument)
+                || "--data-binary".equals(argument) || "-d".equals(argument);
     }
 
     private List<String> commandForCurl(String curl) throws IOException {
@@ -610,6 +637,17 @@ public final class CdrSimulatorApp extends Application {
         }
         if (!current.isEmpty()) arguments.add(current.toString());
         return arguments;
+    }
+
+    private record CurlProcess(Process process, Path payloadFile) {
+        private void deletePayload() {
+            if (payloadFile == null) return;
+            try {
+                Files.deleteIfExists(payloadFile);
+            } catch (IOException ignored) {
+                payloadFile.toFile().deleteOnExit();
+            }
+        }
     }
 
     private String readLimited(InputStream input, int limit) throws IOException {
