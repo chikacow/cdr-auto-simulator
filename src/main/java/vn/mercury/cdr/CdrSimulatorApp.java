@@ -22,16 +22,11 @@ import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 
 import java.io.*;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.time.ZoneOffset;
-import java.time.Duration;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
@@ -533,20 +528,10 @@ public final class CdrSimulatorApp extends Application {
             @Override protected Void call() {
                 for (CdrRow row : selected) {
                     Platform.runLater(() -> { row.status.set("Sending"); row.result.set("Checking"); });
+                    CurlProcess curlProcess = null;
                     try {
-                        if (isWindows()) {
-                            HttpResponse<String> httpResponse = sendWindowsRequest(row.preparedCurl);
-                            String response = httpResponse.body();
-                            boolean success = RESPONSE_DETAIL_OK.matcher(response).find();
-                            Platform.runLater(() -> {
-                                row.status.set("Sent (HTTP " + httpResponse.statusCode() + ")");
-                                row.result.set(success ? "Success" : "Failed");
-                                row.response.set(response);
-                            });
-                            continue;
-                        }
-
-                        Process process = new ProcessBuilder("/bin/zsh", "-lc", row.preparedCurl).redirectErrorStream(true).start();
+                        curlProcess = startCurlProcess(row.preparedCurl);
+                        Process process = curlProcess.process();
                         boolean complete = process.waitFor(45, TimeUnit.SECONDS);
                         String response = readLimited(process.getInputStream(), 4_000);
                         if (!complete) {
@@ -564,6 +549,8 @@ public final class CdrSimulatorApp extends Application {
                         }
                     } catch (Exception exception) {
                         Platform.runLater(() -> { row.status.set("Send failed"); row.result.set("Failed"); row.response.set(exception.getMessage()); });
+                    } finally {
+                        if (curlProcess != null) curlProcess.deleteScript();
                     }
                 }
                 return null;
@@ -578,55 +565,42 @@ public final class CdrSimulatorApp extends Application {
         return System.getProperty("os.name").toLowerCase(Locale.ROOT).contains("win");
     }
 
-    /** Windows sends the parsed request directly, avoiding shell and command-line quote handling. */
-    private HttpResponse<String> sendWindowsRequest(String curl) throws IOException, InterruptedException {
+    private CurlProcess startCurlProcess(String curl) throws IOException {
+        if (!isWindows()) {
+            return new CurlProcess(new ProcessBuilder("/bin/zsh", "-lc", curl).redirectErrorStream(true).start(), null);
+        }
+
+        File gitBash = findGitBash();
+        if (gitBash != null) {
+            Path script = Files.createTempFile("mercury-cdr-", ".sh");
+            try {
+                Files.writeString(script, "#!/usr/bin/env bash\n" + curl + "\n", StandardCharsets.UTF_8);
+                Process process = new ProcessBuilder(gitBash.getAbsolutePath(), "-l", script.toString())
+                        .redirectErrorStream(true)
+                        .start();
+                return new CurlProcess(process, script);
+            } catch (IOException exception) {
+                Files.deleteIfExists(script);
+                throw exception;
+            }
+        }
+
         List<String> arguments = splitCurlArguments(curl);
         if (arguments.isEmpty() || !("curl".equalsIgnoreCase(arguments.get(0)) || "curl.exe".equalsIgnoreCase(arguments.get(0)))) {
             throw new IOException("The cURL command must begin with curl.");
         }
-
-        String url = null;
-        String method = null;
-        String body = null;
-        List<String> headers = new ArrayList<>();
-        for (int index = 1; index < arguments.size(); index++) {
-            String argument = arguments.get(index);
-            if ("--header".equals(argument) || "-H".equals(argument)) {
-                headers.add(nextCurlValue(arguments, ++index, argument));
-            } else if ("--data".equals(argument) || "--data-raw".equals(argument)
-                    || "--data-binary".equals(argument) || "-d".equals(argument)) {
-                body = nextCurlValue(arguments, ++index, argument);
-            } else if ("--request".equals(argument) || "-X".equals(argument)) {
-                method = nextCurlValue(arguments, ++index, argument);
-            } else if ("--url".equals(argument)) {
-                url = nextCurlValue(arguments, ++index, argument);
-            } else if (!argument.startsWith("-") && url == null) {
-                url = argument;
-            }
-        }
-        if (url == null || url.isBlank()) throw new IOException("The cURL command does not contain a request URL.");
-
-        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(45));
-        for (String header : headers) {
-            int separator = header.indexOf(':');
-            if (separator <= 0) throw new IOException("Invalid cURL header: " + header);
-            request.header(header.substring(0, separator).trim(), header.substring(separator + 1).trim());
-        }
-        String requestMethod = method == null ? (body == null ? "GET" : "POST") : method;
-        request.method(requestMethod, body == null
-                ? HttpRequest.BodyPublishers.noBody()
-                : HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8));
-        HttpClient client = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(15))
-                .followRedirects(HttpClient.Redirect.NORMAL)
-                .version(HttpClient.Version.HTTP_1_1)
-                .build();
-        return client.send(request.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        arguments.set(0, "curl.exe");
+        return new CurlProcess(new ProcessBuilder(arguments).redirectErrorStream(true).start(), null);
     }
 
-    private String nextCurlValue(List<String> arguments, int index, String option) throws IOException {
-        if (index >= arguments.size()) throw new IOException("The cURL option " + option + " requires a value.");
-        return arguments.get(index);
+    private File findGitBash() {
+        String[] roots = {System.getenv("ProgramFiles"), System.getenv("ProgramW6432"), "C:\\Program Files"};
+        for (String root : roots) {
+            if (root == null || root.isBlank()) continue;
+            File gitBash = new File(root, "Git\\bin\\bash.exe");
+            if (gitBash.isFile()) return gitBash;
+        }
+        return null;
     }
 
     /** Splits the expected single cURL command while preserving its quoted JSON body. */
@@ -670,6 +644,17 @@ public final class CdrSimulatorApp extends Application {
         }
         if (!current.isEmpty()) arguments.add(current.toString());
         return arguments;
+    }
+
+    private record CurlProcess(Process process, Path script) {
+        private void deleteScript() {
+            if (script == null) return;
+            try {
+                Files.deleteIfExists(script);
+            } catch (IOException ignored) {
+                script.toFile().deleteOnExit();
+            }
+        }
     }
 
     private String readLimited(InputStream input, int limit) throws IOException {
