@@ -22,11 +22,16 @@ import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 
 import java.io.*;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.time.Duration;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
@@ -528,10 +533,20 @@ public final class CdrSimulatorApp extends Application {
             @Override protected Void call() {
                 for (CdrRow row : selected) {
                     Platform.runLater(() -> { row.status.set("Sending"); row.result.set("Checking"); });
-                    CurlProcess curlProcess = null;
                     try {
-                        curlProcess = startCurl(row.preparedCurl);
-                        Process process = curlProcess.process();
+                        if (isWindows()) {
+                            HttpResponse<String> httpResponse = sendWindowsRequest(row.preparedCurl);
+                            String response = httpResponse.body();
+                            boolean success = RESPONSE_DETAIL_OK.matcher(response).find();
+                            Platform.runLater(() -> {
+                                row.status.set("Sent (HTTP " + httpResponse.statusCode() + ")");
+                                row.result.set(success ? "Success" : "Failed");
+                                row.response.set(response);
+                            });
+                            continue;
+                        }
+
+                        Process process = new ProcessBuilder("/bin/zsh", "-lc", row.preparedCurl).redirectErrorStream(true).start();
                         boolean complete = process.waitFor(45, TimeUnit.SECONDS);
                         String response = readLimited(process.getInputStream(), 4_000);
                         if (!complete) {
@@ -549,8 +564,6 @@ public final class CdrSimulatorApp extends Application {
                         }
                     } catch (Exception exception) {
                         Platform.runLater(() -> { row.status.set("Send failed"); row.result.set("Failed"); row.response.set(exception.getMessage()); });
-                    } finally {
-                        if (curlProcess != null) curlProcess.deletePayload();
                     }
                 }
                 return null;
@@ -561,42 +574,62 @@ public final class CdrSimulatorApp extends Application {
         new Thread(task, "cdr-simulation").start();
     }
 
-    private CurlProcess startCurl(String curl) throws IOException {
-        List<String> command = commandForCurl(curl);
-        Path payloadFile = null;
-        if (System.getProperty("os.name").toLowerCase(Locale.ROOT).contains("win")) {
-            for (int index = 0; index < command.size() - 1; index++) {
-                if (isCurlDataOption(command.get(index))) {
-                    payloadFile = Files.createTempFile("mercury-cdr-", ".json");
-                    Files.writeString(payloadFile, command.get(index + 1), StandardCharsets.UTF_8);
-                    command.set(index, "--data-binary");
-                    command.set(index + 1, "@" + payloadFile.toAbsolutePath());
-                    break;
-                }
-            }
-        }
-        return new CurlProcess(new ProcessBuilder(command).redirectErrorStream(true).start(), payloadFile);
+    private boolean isWindows() {
+        return System.getProperty("os.name").toLowerCase(Locale.ROOT).contains("win");
     }
 
-    private boolean isCurlDataOption(String argument) {
-        return "--data".equals(argument) || "--data-raw".equals(argument)
-                || "--data-binary".equals(argument) || "-d".equals(argument);
-    }
-
-    private List<String> commandForCurl(String curl) throws IOException {
-        if (!System.getProperty("os.name").toLowerCase(Locale.ROOT).contains("win")) {
-            return List.of("/bin/zsh", "-lc", curl);
-        }
-
+    /** Windows sends the parsed request directly, avoiding shell and command-line quote handling. */
+    private HttpResponse<String> sendWindowsRequest(String curl) throws IOException, InterruptedException {
         List<String> arguments = splitCurlArguments(curl);
         if (arguments.isEmpty() || !("curl".equalsIgnoreCase(arguments.get(0)) || "curl.exe".equalsIgnoreCase(arguments.get(0)))) {
             throw new IOException("The cURL command must begin with curl.");
         }
-        arguments.set(0, "curl.exe");
-        return arguments;
+
+        String url = null;
+        String method = null;
+        String body = null;
+        List<String> headers = new ArrayList<>();
+        for (int index = 1; index < arguments.size(); index++) {
+            String argument = arguments.get(index);
+            if ("--header".equals(argument) || "-H".equals(argument)) {
+                headers.add(nextCurlValue(arguments, ++index, argument));
+            } else if ("--data".equals(argument) || "--data-raw".equals(argument)
+                    || "--data-binary".equals(argument) || "-d".equals(argument)) {
+                body = nextCurlValue(arguments, ++index, argument);
+            } else if ("--request".equals(argument) || "-X".equals(argument)) {
+                method = nextCurlValue(arguments, ++index, argument);
+            } else if ("--url".equals(argument)) {
+                url = nextCurlValue(arguments, ++index, argument);
+            } else if (!argument.startsWith("-") && url == null) {
+                url = argument;
+            }
+        }
+        if (url == null || url.isBlank()) throw new IOException("The cURL command does not contain a request URL.");
+
+        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(45));
+        for (String header : headers) {
+            int separator = header.indexOf(':');
+            if (separator <= 0) throw new IOException("Invalid cURL header: " + header);
+            request.header(header.substring(0, separator).trim(), header.substring(separator + 1).trim());
+        }
+        String requestMethod = method == null ? (body == null ? "GET" : "POST") : method;
+        request.method(requestMethod, body == null
+                ? HttpRequest.BodyPublishers.noBody()
+                : HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8));
+        HttpClient client = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(15))
+                .followRedirects(HttpClient.Redirect.NORMAL)
+                .version(HttpClient.Version.HTTP_1_1)
+                .build();
+        return client.send(request.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
     }
 
-    /** Splits the expected single cURL command without passing its JSON body through cmd.exe. */
+    private String nextCurlValue(List<String> arguments, int index, String option) throws IOException {
+        if (index >= arguments.size()) throw new IOException("The cURL option " + option + " requires a value.");
+        return arguments.get(index);
+    }
+
+    /** Splits the expected single cURL command while preserving its quoted JSON body. */
     private List<String> splitCurlArguments(String command) throws IOException {
         List<String> arguments = new ArrayList<>();
         StringBuilder current = new StringBuilder();
@@ -637,17 +670,6 @@ public final class CdrSimulatorApp extends Application {
         }
         if (!current.isEmpty()) arguments.add(current.toString());
         return arguments;
-    }
-
-    private record CurlProcess(Process process, Path payloadFile) {
-        private void deletePayload() {
-            if (payloadFile == null) return;
-            try {
-                Files.deleteIfExists(payloadFile);
-            } catch (IOException ignored) {
-                payloadFile.toFile().deleteOnExit();
-            }
-        }
     }
 
     private String readLimited(InputStream input, int limit) throws IOException {

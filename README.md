@@ -24,7 +24,7 @@ On Windows, install Java 17+ and Apache Maven, then double-click `run-cdr-simula
 run-cdr-simulator.bat
 ```
 
-Windows 10/11 already includes `curl.exe`. The application calls it directly so Bash-style quotes in the Excel cURL body are preserved; Git Bash is not required.
+On Windows, the application reads the endpoint, headers, and JSON body from the Excel cURL, then sends the request through Java. This preserves the UTF-8 JSON body without relying on a shell, Git Bash, or `curl.exe`.
 
 Do not open `target/cdr-simulator-fx-1.0.0.jar` directly or run `java -jar ...`. That jar does not package the JavaFX native runtime and will report `JavaFX runtime components are missing`.
 
