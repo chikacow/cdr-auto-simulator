@@ -28,6 +28,12 @@ On Windows, the application uses Git Bash when available. It writes each cURL to
 
 Do not open `target/cdr-simulator-fx-1.0.0.jar` directly or run `java -jar ...`. That jar does not package the JavaFX native runtime and will report `JavaFX runtime components are missing`.
 
+## Download a packaged desktop app
+
+The **Package desktop applications** GitHub Actions workflow creates self-contained ZIP files for Windows x64, macOS Intel, and macOS Apple Silicon. The ZIP includes Java and JavaFX, so end users only unzip it and open the application; they do not need Java, Maven, Git, or a terminal.
+
+To create packages, open the repository's **Actions** tab, select **Package desktop applications**, and choose **Run workflow**. Download the matching artifact after the workflow finishes. On the first launch of an unsigned macOS package, use Control-click, then choose **Open**.
+
 ## Run and debug in IntelliJ
 
 The bundled **Run Mercury CDR Simulator** Application configuration is for macOS Apple Silicon. On Windows, run the Maven goal `javafx:run` from IntelliJ's Maven panel, or use `run-cdr-simulator.bat`.

@@ -1,0 +1,95 @@
+name: Package desktop applications
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/package-desktop.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Windows x64
+            runner: windows-latest
+            javafx_platform: windows-x64
+            package_name: Mercury-CDR-Simulator-windows-x64.zip
+          - label: macOS Intel
+            runner: macos-15-intel
+            javafx_platform: osx-x64
+            package_name: Mercury-CDR-Simulator-macos-intel.zip
+          - label: macOS Apple Silicon
+            runner: macos-14
+            javafx_platform: osx-aarch64
+            package_name: Mercury-CDR-Simulator-macos-apple-silicon.zip
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: Build a self-contained application image
+        shell: bash
+        env:
+          JAVAFX_PLATFORM: ${{ matrix.javafx_platform }}
+          PACKAGE_NAME: ${{ matrix.package_name }}
+        run: |
+          set -euo pipefail
+          APP_VERSION="$(mvn -q -DforceStdout help:evaluate -Dexpression=project.version)"
+          JAVAFX_VERSION="$(mvn -q -DforceStdout help:evaluate -Dexpression=javafx.version)"
+          INPUT_DIR="target/package-input"
+          rm -rf "$INPUT_DIR" dist javafx-sdk javafx-sdk.zip
+
+          mvn -B -DskipTests package org.apache.maven.plugins:maven-dependency-plugin:3.7.1:copy-dependencies \
+            -DincludeScope=runtime -DoutputDirectory="$INPUT_DIR"
+          cp "target/cdr-simulator-fx-${APP_VERSION}.jar" "$INPUT_DIR/"
+          rm -f "$INPUT_DIR"/javafx-*.jar
+
+          curl --fail --location --retry 3 \
+            --output javafx-sdk.zip \
+            "https://download2.gluonhq.com/openjfx/${JAVAFX_VERSION}/openjfx-${JAVAFX_VERSION}_${JAVAFX_PLATFORM}_bin-sdk.zip"
+          mkdir javafx-sdk
+          (
+            cd javafx-sdk
+            jar xf ../javafx-sdk.zip
+          )
+
+          jpackage \
+            --type app-image \
+            --name "Mercury CDR Simulator" \
+            --app-version "$APP_VERSION" \
+            --input "$INPUT_DIR" \
+            --main-jar "cdr-simulator-fx-${APP_VERSION}.jar" \
+            --main-class vn.mercury.cdr.CdrSimulatorApp \
+            --module-path "javafx-sdk/javafx-sdk-${JAVAFX_VERSION}/lib" \
+            --add-modules javafx.controls \
+            --java-options "-Dfile.encoding=UTF-8" \
+            --dest dist
+
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            powershell.exe -NoProfile -Command '$source = Join-Path $env:GITHUB_WORKSPACE "dist\\Mercury CDR Simulator"; $destination = Join-Path $env:GITHUB_WORKSPACE $env:PACKAGE_NAME; Compress-Archive -Path $source -DestinationPath $destination -Force'
+          else
+            ditto -c -k --sequesterRsrc --keepParent "dist/Mercury CDR Simulator.app" "$PACKAGE_NAME"
+          fi
+
+      - name: Upload packaged app
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.package_name }}
+          path: ${{ matrix.package_name }}
+          if-no-files-found: error
